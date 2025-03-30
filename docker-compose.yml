@@ -62,7 +62,7 @@ services:
       args:
         ELASTIC_VERSION: ${ELASTIC_VERSION}
     volumes:
-      - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml:ro,Z
+      # Keep pipeline files but remove the problematic config file mount
       - ./logstash/pipeline:/usr/share/logstash/pipeline:ro,Z
     ports:
       - "5044:5044"
@@ -72,6 +72,13 @@ services:
     environment:
       LS_JAVA_OPTS: -Xms256m -Xmx256m
       LOGSTASH_INTERNAL_PASSWORD: ${LOGSTASH_INTERNAL_PASSWORD:-}
+      # Move logstash.yml settings to environment variables
+      node.name: logstash
+      http.host: 0.0.0.0
+      http.port: 9600
+      monitoring.elasticsearch.hosts: '["http://elasticsearch:9200"]'
+      monitoring.elasticsearch.username: logstash_internal
+      monitoring.elasticsearch.password: ${LOGSTASH_INTERNAL_PASSWORD:-}
     networks:
       - elk
     depends_on:
@@ -83,14 +90,22 @@ services:
       context: kibana/
       args:
         ELASTIC_VERSION: ${ELASTIC_VERSION}
-    volumes:
-      - ./kibana/config/kibana.yml:/usr/share/kibana/config/kibana.yml:ro,Z
+    # Remove the problematic config file mount
     ports:
       - "5601:5601"
     environment:
       KIBANA_SYSTEM_PASSWORD: ${KIBANA_SYSTEM_PASSWORD:-}
       # Add server.host setting to make Kibana accessible externally
       SERVER_HOST: 0.0.0.0
+      # Add all kibana.yml settings as environment variables
+      server.name: kibana
+      server.host: 0.0.0.0
+      elasticsearch.hosts: '["http://elasticsearch:9200"]'
+      monitoring.ui.container.elasticsearch.enabled: "true"
+      monitoring.ui.container.logstash.enabled: "true"
+      elasticsearch.username: kibana_system
+      elasticsearch.password: ${KIBANA_SYSTEM_PASSWORD:-}
+      server.publicBaseUrl: "http://10.0.0.23:5601"
     networks:
       - elk
     depends_on:
