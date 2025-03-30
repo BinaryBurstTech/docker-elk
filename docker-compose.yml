@@ -20,10 +20,14 @@ services:
       HEARTBEAT_INTERNAL_PASSWORD: ${HEARTBEAT_INTERNAL_PASSWORD:-}
       MONITORING_INTERNAL_PASSWORD: ${MONITORING_INTERNAL_PASSWORD:-}
       BEATS_SYSTEM_PASSWORD: ${BEATS_SYSTEM_PASSWORD:-}
+      # Add hostname to make it easier to connect to Elasticsearch
+      ELASTICSEARCH_HOST: elasticsearch
     networks:
       - elk
+    # Make sure Elasticsearch is healthy before starting setup
     depends_on:
-      - elasticsearch
+      elasticsearch:
+        condition: service_healthy
 
   elasticsearch:
     build:
@@ -48,6 +52,8 @@ services:
       http.host: 0.0.0.0
       xpack.license.self_generated.type: trial
       xpack.security.enabled: "true"
+      # Enable API key authentication
+      xpack.security.authc.api_key.enabled: "true"
       http.cors.enabled: "true"
       http.cors.allow-origin: "http://10.0.0.56:8080"
       "http.cors.allow-methods": "OPTIONS, HEAD, GET, POST, PUT, DELETE"
@@ -55,15 +61,19 @@ services:
     networks:
       - elk
     restart: unless-stopped
+    # Add healthcheck to ensure Elasticsearch is up before setup runs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   logstash:
     build:
       context: logstash/
       args:
         ELASTIC_VERSION: ${ELASTIC_VERSION}
-    volumes:
-      # Keep pipeline files but remove the problematic config file mount
-      - ./logstash/pipeline:/usr/share/logstash/pipeline:ro,Z
+    # Remove all volume mounts and we'll handle pipeline config via environment vars
     ports:
       - "5044:5044"
       - "50000:50000/tcp"
@@ -72,13 +82,55 @@ services:
     environment:
       LS_JAVA_OPTS: -Xms256m -Xmx256m
       LOGSTASH_INTERNAL_PASSWORD: ${LOGSTASH_INTERNAL_PASSWORD:-}
-      # Move logstash.yml settings to environment variables
+      # logstash.yml equivalent settings
       node.name: logstash
       http.host: 0.0.0.0
       http.port: 9600
-      monitoring.elasticsearch.hosts: '["http://elasticsearch:9200"]'
-      monitoring.elasticsearch.username: logstash_internal
-      monitoring.elasticsearch.password: ${LOGSTASH_INTERNAL_PASSWORD:-}
+      # Authentication config
+      xpack.monitoring.enabled: "true"
+      xpack.monitoring.elasticsearch.username: logstash_internal
+      xpack.monitoring.elasticsearch.password: ${LOGSTASH_INTERNAL_PASSWORD:-}
+      xpack.monitoring.elasticsearch.hosts: '["http://elasticsearch:9200"]'
+      # Pipeline configuration via config.string
+      config.string: |
+        input {
+          beats {
+            port => 5044
+          }
+          tcp {
+            port => 50000
+            codec => json_lines
+          }
+          http {
+            port => 8080
+            codec => json
+          }
+        }
+        filter {
+          if [type] == "springboot" {
+            grok {
+              match => { "message" => "%{TIMESTAMP_ISO8601:timestamp} %{LOGLEVEL:level} %{GREEDYDATA:logger} - %{GREEDYDATA:log_message}" }
+            }
+            date {
+              match => [ "timestamp", "yyyy-MM-dd HH:mm:ss.SSS" ]
+              target => "@timestamp"
+            }
+          }
+        }
+        output {
+          elasticsearch {
+            hosts => ["elasticsearch:9200"]
+            user => "logstash_internal"
+            password => "${LOGSTASH_INTERNAL_PASSWORD}"
+            index => "%{[@metadata][beat]}-%{[@metadata][version]}-%{+YYYY.MM.dd}"
+          }
+          elasticsearch {
+            hosts => ["elasticsearch:9200"]
+            user => "logstash_internal"
+            password => "${LOGSTASH_INTERNAL_PASSWORD}"
+            index => "logstash-%{+YYYY.MM.dd}"
+          }
+        }
     networks:
       - elk
     depends_on:
