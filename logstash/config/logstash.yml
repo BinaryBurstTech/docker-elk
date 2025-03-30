@@ -3,5 +3,11 @@
 ## https://github.com/elastic/logstash/blob/main/docker/data/logstash/config/logstash-full.yml
 #
 http.host: 0.0.0.0
+http.port: 9600
 
 node.name: logstash
+
+# Ensure monitoring data is sent to Elasticsearch
+monitoring.elasticsearch.hosts: ["http://elasticsearch:9200"]
+monitoring.elasticsearch.username: logstash_internal
+monitoring.elasticsearch.password: ${LOGSTASH_INTERNAL_PASSWORD}
