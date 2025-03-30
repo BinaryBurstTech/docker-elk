@@ -20,11 +20,9 @@ services:
       HEARTBEAT_INTERNAL_PASSWORD: ${HEARTBEAT_INTERNAL_PASSWORD:-}
       MONITORING_INTERNAL_PASSWORD: ${MONITORING_INTERNAL_PASSWORD:-}
       BEATS_SYSTEM_PASSWORD: ${BEATS_SYSTEM_PASSWORD:-}
-      # Add hostname to make it easier to connect to Elasticsearch
       ELASTICSEARCH_HOST: elasticsearch
     networks:
       - elk
-    # Make sure Elasticsearch is healthy before starting setup
     depends_on:
       elasticsearch:
         condition: service_healthy
@@ -34,8 +32,6 @@ services:
       context: elasticsearch/
       args:
         ELASTIC_VERSION: ${ELASTIC_VERSION}
-    # We're replacing the file mount with environment variables
-    # to avoid mount conflicts
     volumes:
       - elasticsearch:/usr/share/elasticsearch/data:Z
     ports:
@@ -46,22 +42,9 @@ services:
       ES_JAVA_OPTS: -Xms512m -Xmx512m
       ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:-}
       discovery.type: single-node
-      # Configuration from elasticsearch.yml moved to environment variables
-      cluster.name: docker-cluster
-      network.host: 0.0.0.0
-      http.host: 0.0.0.0
-      xpack.license.self_generated.type: trial
-      xpack.security.enabled: "true"
-      # Enable API key authentication
-      xpack.security.authc.api_key.enabled: "true"
-      http.cors.enabled: "true"
-      http.cors.allow-origin: "http://10.0.0.56:8080"
-      "http.cors.allow-methods": "OPTIONS, HEAD, GET, POST, PUT, DELETE"
-      "http.cors.allow-headers": "X-Requested-With, X-Auth-Token, Content-Type, Content-Length, Authorization"
     networks:
       - elk
     restart: unless-stopped
-    # Add healthcheck to ensure Elasticsearch is up before setup runs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health"]
       interval: 30s
@@ -73,68 +56,20 @@ services:
       context: logstash/
       args:
         ELASTIC_VERSION: ${ELASTIC_VERSION}
-    # Remove all volume mounts and we'll handle pipeline config via environment vars
     ports:
       - "5044:5044"
       - "50000:50000/tcp"
       - "50000:50000/udp"
+      - "8080:8080"
       - "9600:9600"
     environment:
       LS_JAVA_OPTS: -Xms256m -Xmx256m
       LOGSTASH_INTERNAL_PASSWORD: ${LOGSTASH_INTERNAL_PASSWORD:-}
-      # logstash.yml equivalent settings
-      node.name: logstash
-      http.host: 0.0.0.0
-      http.port: 9600
-      # Authentication config
-      xpack.monitoring.enabled: "true"
-      xpack.monitoring.elasticsearch.username: logstash_internal
-      xpack.monitoring.elasticsearch.password: ${LOGSTASH_INTERNAL_PASSWORD:-}
-      xpack.monitoring.elasticsearch.hosts: '["http://elasticsearch:9200"]'
-      # Pipeline configuration via config.string
-      config.string: |
-        input {
-          beats {
-            port => 5044
-          }
-          tcp {
-            port => 50000
-            codec => json_lines
-          }
-          http {
-            port => 8080
-            codec => json
-          }
-        }
-        filter {
-          if [type] == "springboot" {
-            grok {
-              match => { "message" => "%{TIMESTAMP_ISO8601:timestamp} %{LOGLEVEL:level} %{GREEDYDATA:logger} - %{GREEDYDATA:log_message}" }
-            }
-            date {
-              match => [ "timestamp", "yyyy-MM-dd HH:mm:ss.SSS" ]
-              target => "@timestamp"
-            }
-          }
-        }
-        output {
-          elasticsearch {
-            hosts => ["elasticsearch:9200"]
-            user => "logstash_internal"
-            password => "${LOGSTASH_INTERNAL_PASSWORD}"
-            index => "%{[@metadata][beat]}-%{[@metadata][version]}-%{+YYYY.MM.dd}"
-          }
-          elasticsearch {
-            hosts => ["elasticsearch:9200"]
-            user => "logstash_internal"
-            password => "${LOGSTASH_INTERNAL_PASSWORD}"
-            index => "logstash-%{+YYYY.MM.dd}"
-          }
-        }
     networks:
       - elk
     depends_on:
-      - elasticsearch
+      elasticsearch:
+        condition: service_healthy
     restart: unless-stopped
 
   kibana:
@@ -142,26 +77,15 @@ services:
       context: kibana/
       args:
         ELASTIC_VERSION: ${ELASTIC_VERSION}
-    # Remove the problematic config file mount
     ports:
       - "5601:5601"
     environment:
       KIBANA_SYSTEM_PASSWORD: ${KIBANA_SYSTEM_PASSWORD:-}
-      # Add server.host setting to make Kibana accessible externally
-      SERVER_HOST: 0.0.0.0
-      # Add all kibana.yml settings as environment variables
-      server.name: kibana
-      server.host: 0.0.0.0
-      elasticsearch.hosts: '["http://elasticsearch:9200"]'
-      monitoring.ui.container.elasticsearch.enabled: "true"
-      monitoring.ui.container.logstash.enabled: "true"
-      elasticsearch.username: kibana_system
-      elasticsearch.password: ${KIBANA_SYSTEM_PASSWORD:-}
-      server.publicBaseUrl: "http://10.0.0.23:5601"
     networks:
       - elk
     depends_on:
-      - elasticsearch
+      elasticsearch:
+        condition: service_healthy
     restart: unless-stopped
 
 networks:
