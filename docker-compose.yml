@@ -30,8 +30,9 @@ services:
       context: elasticsearch/
       args:
         ELASTIC_VERSION: ${ELASTIC_VERSION}
+    # We're replacing the file mount with environment variables
+    # to avoid mount conflicts
     volumes:
-      - ./elasticsearch/config/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro,Z
       - elasticsearch:/usr/share/elasticsearch/data:Z
     ports:
       - "9200:9200"
@@ -41,10 +42,16 @@ services:
       ES_JAVA_OPTS: -Xms512m -Xmx512m
       ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:-}
       discovery.type: single-node
-      # Add binding to all interfaces so it's accessible from other VMs
-      http.host: 0.0.0.0
-      # Add network.host setting
+      # Configuration from elasticsearch.yml moved to environment variables
+      cluster.name: docker-cluster
       network.host: 0.0.0.0
+      http.host: 0.0.0.0
+      xpack.license.self_generated.type: trial
+      xpack.security.enabled: "true"
+      http.cors.enabled: "true"
+      http.cors.allow-origin: "http://10.0.0.56:8080"
+      "http.cors.allow-methods": "OPTIONS, HEAD, GET, POST, PUT, DELETE"
+      "http.cors.allow-headers": "X-Requested-With, X-Auth-Token, Content-Type, Content-Length, Authorization"
     networks:
       - elk
     restart: unless-stopped
